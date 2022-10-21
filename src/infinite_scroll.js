@@ -1,26 +1,30 @@
 import { per_page, page, fetchImages } from './fetch_images';
 import './css/styles.css';
 import Notiflix from 'notiflix';
-import axios from 'axios';
+
 import SimpleLightbox from 'simplelightbox';
 
 import 'simplelightbox/dist/simple-lightbox.min.css';
+import throttle from 'lodash.throttle';
 
 let sumPerPage = 0;
 let nextPage = 0;
 
+let isLoading = false;
+
+let shouldLoad = true;
+
 const formEl = document.querySelector('#search-form');
 const inputEl = document.querySelector('input');
 const galleryEl = document.querySelector('.gallery');
-const btnLoadMoreEl = document.querySelector('.load-more');
 
 formEl.addEventListener('submit', onFormSubmit);
 
 async function onFormSubmit(event) {
     event.preventDefault();
     galleryEl.innerHTML = '';
-    sumPerPage = 0;
-    btnLoadMoreEl.classList.add('visually-hidden');
+    isLoading = false;
+    shouldLoad = true;
 
     const inputValue = event.currentTarget.elements.safesearch.value.trim();
 
@@ -49,33 +53,31 @@ async function onFormSubmit(event) {
                 /* options */
             });
 
-
-            if (totalQuantityImages / per_page <= 1) {
-                btnLoadMoreEl.classList.add('visually-hidden');
-                return;
-            }
-
             sumPerPage = per_page;
             nextPage = page;
 
-            btnLoadMoreEl.classList.remove('visually-hidden');
-
-            btnLoadMoreEl.addEventListener('click', onbtnLoadMoreEl);
+            window.addEventListener('scroll', throttle(checkPosition, 250));
+            window.addEventListener('resize', throttle(checkPosition, 250));
         }
     } catch (error) {
         console.log(error.message);
     }
 }
 
-async function onbtnLoadMoreEl() {
+async function fetchNewPageImagesWithScroll() {
     const dataInput = inputEl.value;
 
-    nextPage += page;
-    sumPerPage += per_page;
-
-    btnLoadMoreEl.classList.add('visually-hidden');
-
     try {
+
+        if (isLoading || !shouldLoad) {
+            return;
+        }
+
+        isLoading = true;
+
+        nextPage += page;
+        sumPerPage += per_page;
+
         const newPagedataOfImages = await fetchImages(dataInput, nextPage);
         const newArrayImages = newPagedataOfImages.hits;
         const maxQuantityImages = newPagedataOfImages.totalHits;
@@ -87,15 +89,17 @@ async function onbtnLoadMoreEl() {
 
             renderMarkupAndSmoothScroll(newArrayImages);
 
-            btnLoadMoreEl.classList.add('visually-hidden');
-            btnLoadMoreEl.removeEventListener('click', onbtnLoadMoreEl);
+            window.removeEventListener('scroll', throttle(checkPosition, 250));
+            window.removeEventListener('resize', throttle(checkPosition, 250));
+
+            shouldLoad = false;
 
             return;
         }
 
         renderMarkupAndSmoothScroll(newArrayImages);
 
-        btnLoadMoreEl.classList.remove('visually-hidden');
+        isLoading = false;
     } catch (error) {
         console.log(error.message);
     }
@@ -139,20 +143,30 @@ function renderPhotoCard(arrayImages) {
     galleryEl.insertAdjacentHTML('beforeend', markup);
 }
 
-function smoothScroll() {
-    const positionCardToScroll =
-        galleryEl.firstElementChild.getBoundingClientRect().height;
+async function checkPosition() {
+    const height = document.body.offsetHeight;
+    const screenHeight = window.innerHeight;
 
-    window.scrollBy({
-        top: positionCardToScroll * 2,
-        behavior: 'smooth',
-    });
+    const scrolled = window.scrollY;
+
+    const threshold = height - screenHeight / 4;
+
+    const position = scrolled + screenHeight;
+
+    if (position >= threshold) {
+
+
+        try {
+            await fetchNewPageImagesWithScroll();
+        } catch (error) {
+            console.log(error.message);
+        }
+    }
 }
 
 function renderMarkupAndSmoothScroll(newArrayImages) {
     renderPhotoCard(newArrayImages);
-    smoothScroll();
 
     const gallery = new SimpleLightbox('.gallery a');
-    gallery.refresh();
 }
+
